@@ -41,7 +41,7 @@ class Model(nn.Module):
         self.stride = configs.stride
 
         if configs.llm_model == 'LLAMA':
-            # self.llama_config = LlamaConfig.from_pretrained('/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/')
+            # 从安装的transformer库加载了这些预备训练的参数权重
             self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
             self.llama_config.num_hidden_layers = configs.llm_layers
             self.llama_config.output_attentions = True
@@ -103,6 +103,17 @@ class Model(nn.Module):
                 )
 
             try:
+                """
+                1. https://huggingface.co/docs/transformers/en/model_doc/gpt2 
+                tokenizer 的作用是把字符转换为编码 
+                
+                from transformers import GPT2Tokenizer
+                 
+                tokenizer = GPT2Tokenizer.from_pretrained("openai-community/gpt2")
+                tokenizer("Hello world")["input_ids"]
+                [15496, 995]
+
+                """
                 self.tokenizer = GPT2Tokenizer.from_pretrained(
                     'openai-community/gpt2',
                     trust_remote_code=True,
@@ -177,7 +188,9 @@ class Model(nn.Module):
         self.vocab_size = self.word_embeddings.shape[0]
         self.num_tokens = 1000
         self.mapping_layer = nn.Linear(self.vocab_size, self.num_tokens)
-
+        """
+        ReprogrammingLayer => 程序的核心改进点？？
+        """
         self.reprogramming_layer = ReprogrammingLayer(configs.d_model, configs.n_heads, self.d_ff, self.d_llm)
 
         self.patch_nums = int((configs.seq_len - self.patch_len) / self.stride + 2)
@@ -269,7 +282,10 @@ class ReprogrammingLayer(nn.Module):
         super(ReprogrammingLayer, self).__init__()
 
         d_keys = d_keys or (d_model // n_heads)
+        """
+         nn.Linear： Applies a linear transformation to the incoming data:  Y= X.A(T) + b线性算子
 
+        """
         self.query_projection = nn.Linear(d_model, d_keys * n_heads)
         self.key_projection = nn.Linear(d_llm, d_keys * n_heads)
         self.value_projection = nn.Linear(d_llm, d_keys * n_heads)
@@ -296,7 +312,9 @@ class ReprogrammingLayer(nn.Module):
         B, L, H, E = target_embedding.shape
 
         scale = 1. / sqrt(E)
-
+        """
+         einsum运算  https://rockt.github.io/2018/04/30/einsum 
+        """
         scores = torch.einsum("blhe,she->bhls", target_embedding, source_embedding)
 
         A = self.dropout(torch.softmax(scale * scores, dim=-1))
