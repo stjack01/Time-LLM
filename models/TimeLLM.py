@@ -180,18 +180,22 @@ class Model(nn.Module):
             self.description = 'The Electricity Transformer Temperature (ETT) is a crucial indicator in the electric power long-term deployment.'
 
         self.dropout = nn.Dropout(configs.dropout)
-
+        """
+            d_model = 32, 
+        """
         self.patch_embedding = PatchEmbedding(
             configs.d_model, self.patch_len, self.stride, configs.dropout)
-
+        ##  解析出LLM的tokens
         self.word_embeddings = self.llm_model.get_input_embeddings().weight
         self.vocab_size = self.word_embeddings.shape[0]
         self.num_tokens = 1000
+        ##   这个就是所谓的选择token？？？需要训练？？？ 论文5页段2
         self.mapping_layer = nn.Linear(self.vocab_size, self.num_tokens)
         """
         ReprogrammingLayer => 程序的核心改进点？？
         """
         self.reprogramming_layer = ReprogrammingLayer(configs.d_model, configs.n_heads, self.d_ff, self.d_llm)
+        ##  patch之后的矩阵 = P * N的N的值 => 64 = (512 - 16)/8 + 2
 
         self.patch_nums = int((configs.seq_len - self.patch_len) / self.stride + 2)
         self.head_nf = self.d_ff * self.patch_nums
@@ -201,7 +205,7 @@ class Model(nn.Module):
                                                  head_dropout=configs.dropout)
         else:
             raise NotImplementedError
-
+        ##  使用了RevIn 算法进行归一化 https://github.com/ts-kim/RevIN
         self.normalize_layers = Normalize(configs.enc_in, affine=False)
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
@@ -209,11 +213,14 @@ class Model(nn.Module):
             dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
             return dec_out[:, -self.pred_len:, :]
         return None
-
+    """
+        forward调用途径：  https://blog.csdn.net/weixin_41912543/article/details/108147378
+        runmain.py, Line 204, 206
+    """
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
 
         x_enc = self.normalize_layers(x_enc, 'norm')
-
+        ##  B -> batch ?, T, N
         B, T, N = x_enc.size()
         x_enc = x_enc.permute(0, 2, 1).contiguous().reshape(B * N, T, 1)
 
@@ -224,6 +231,7 @@ class Model(nn.Module):
         trends = x_enc.diff(dim=1).sum(dim=1)
 
         prompt = []
+        ##   这是把数据 -> str 再附加prompt？？
         for b in range(x_enc.shape[0]):
             min_values_str = str(min_values[b].tolist()[0])
             max_values_str = str(max_values[b].tolist()[0])
@@ -241,18 +249,24 @@ class Model(nn.Module):
             )
 
             prompt.append(prompt_)
+        """
+           所以是先把 prompt和data转换为token，通知LLM执行推理，再输出的token转换back到数字？？
+        """
 
+        ## contiguous(): 写入内存？？ https://stackoverflow.com/questions/48915810/what-does-contiguous-do-in-pytorch
         x_enc = x_enc.reshape(B, N, T).permute(0, 2, 1).contiguous()
-
+        ## 把数据和prompt的混合体tokenizer获取token ID
         prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048).input_ids
         prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(x_enc.device))  # (batch, prompt_token, dim)
-
+        ##  self.mapping_layer ==> nn.Linear(self.vocab_size, self.num_tokens) 这就是论文第5页段2谈到的降低token数量
         source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0)
 
         x_enc = x_enc.permute(0, 2, 1).contiguous()
         enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
         enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings)
         llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
+        ##   https://huggingface.co/docs/transformers/en/main_classes/output， llm_model(...) 就是调用LLM执行推理！
+        ##   last_hidden_state
         dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state
         dec_out = dec_out[:, :, :self.d_ff]
 
@@ -283,8 +297,7 @@ class ReprogrammingLayer(nn.Module):
 
         d_keys = d_keys or (d_model // n_heads)
         """
-         nn.Linear： Applies a linear transformation to the incoming data:  Y= X.A(T) + b线性算子
-
+         nn.Linear： Applies a linear transformation to the incoming data:  Y= X.A(Tanspose) + b线性算子
         """
         self.query_projection = nn.Linear(d_model, d_keys * n_heads)
         self.key_projection = nn.Linear(d_llm, d_keys * n_heads)
@@ -314,6 +327,7 @@ class ReprogrammingLayer(nn.Module):
         scale = 1. / sqrt(E)
         """
          einsum运算  https://rockt.github.io/2018/04/30/einsum 
+                     https://rogerspy.github.io/2021/09/12/einsum-mhsa/ 讲解得很不错！！
         """
         scores = torch.einsum("blhe,she->bhls", target_embedding, source_embedding)
 

@@ -107,6 +107,7 @@ ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 # 自定义的模型参数
 deepspeed_plugin = DeepSpeedPlugin(hf_ds_config='./ds_config_zero2.json')
 accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], deepspeed_plugin=deepspeed_plugin)
+
 # long_term_forecast_ETTh1_512_96_TimeLLM_ETTh1_ftM_sl512_ll48_pl96_dm32_nh8_el2_dl1_df128_fc3_ebtimeF_Exp_0-TimeLLM-ETTh1
 for ii in range(args.itr):
     # setting record of experiments
@@ -168,7 +169,7 @@ for ii in range(args.itr):
 
     criterion = nn.MSELoss()
     mae_metric = nn.L1Loss()
-
+    # Prepare all objects passed in args for distributed training and mixed precision, then return them in the same order.
     train_loader, vali_loader, test_loader, model, model_optim, scheduler = accelerator.prepare(
         train_loader, vali_loader, test_loader, model, model_optim, scheduler)
 
@@ -184,7 +185,14 @@ for ii in range(args.itr):
         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in tqdm(enumerate(train_loader)):
             iter_count += 1
             model_optim.zero_grad()
-
+            """ 
+                所以X和Y需要重新编码？？？
+                batch_y.shape  => torch.Size([24, 144, 1])
+                batch_x.shape  => torch.Size([24, 512, 1])
+                batch_x_mark.shape => torch.Size([24, 512, 4])
+                batch_y_mark.shape => torch.Size([24, 144, 4])
+                
+            """
             batch_x = batch_x.float().to(accelerator.device)
             batch_y = batch_y.float().to(accelerator.device)
             batch_x_mark = batch_x_mark.float().to(accelerator.device)
@@ -211,6 +219,7 @@ for ii in range(args.itr):
                     train_loss.append(loss.item())
             else:
                 if args.output_attention:
+                    # 执行初始化和model的forward方法？？
                     outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                 else:
                     outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
