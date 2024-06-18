@@ -220,7 +220,7 @@ class Model(nn.Module):
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
 
         x_enc = self.normalize_layers(x_enc, 'norm')
-        ##  B -> batch ?, T, N
+        ##  B -> batch 24, T = 512, N = 1
         B, T, N = x_enc.size()
         x_enc = x_enc.permute(0, 2, 1).contiguous().reshape(B * N, T, 1)
 
@@ -258,15 +258,23 @@ class Model(nn.Module):
         ## 把数据和prompt的混合体tokenizer获取token ID
         prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048).input_ids
         prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(x_enc.device))  # (batch, prompt_token, dim)
+
         ##  self.mapping_layer ==> nn.Linear(self.vocab_size, self.num_tokens) 这就是论文第5页段2谈到的降低token数量
         source_embeddings = self.mapping_layer(self.word_embeddings.permute(1, 0)).permute(1, 0)
 
         x_enc = x_enc.permute(0, 2, 1).contiguous()
         enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
+
         enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings)
+        """
+          figure 2的中间的图示，把 prompt_embeddings 和 patch_embedding的结果简单的 concat起来，然后扔给LLM ？？
+        """
         llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
-        ##   https://huggingface.co/docs/transformers/en/main_classes/output， llm_model(...) 就是调用LLM执行推理！
-        ##   last_hidden_state
+
+        """
+            调用LLM执行推理！  https://huggingface.co/docs/transformers/en/main_classes/output， llm_model(...) 就是
+            last_hidden_state => LLM返回的参数值
+        """
         dec_out = self.llm_model(inputs_embeds=llama_enc_out).last_hidden_state
         dec_out = dec_out[:, :, :self.d_ff]
 

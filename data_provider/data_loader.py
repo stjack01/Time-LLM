@@ -10,6 +10,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+## ETT_hour总数据 = 17,240 = 8,620 * 2
+## features='M'
 class Dataset_ETT_hour(Dataset):
     def __init__(self, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
@@ -32,29 +34,39 @@ class Dataset_ETT_hour(Dataset):
         self.features = features
         self.target = target
         self.scale = scale
-        self.timeenc = timeenc
+        self.timeenc = timeenc ## timeenc ==1
         self.freq = freq
 
         # self.percent = percent
         self.root_path = root_path
         self.data_path = data_path
         self.__read_data__()
-
+        # self.data_x
         self.enc_in = self.data_x.shape[-1]
+        ## 因为 最后一笔数据 length = self.seq_len +self.pred_len - 1， 所以可用的total len需要扣减
         self.tot_len = len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def __read_data__(self):
+        ## 执行 scaler 标准化input, 17420 records in total
         self.scaler = StandardScaler()
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
-
-        border1s = [0, 12 * 30 * 24 - self.seq_len, 12 * 30 * 24 + 4 * 30 * 24 - self.seq_len]
-        border2s = [12 * 30 * 24, 12 * 30 * 24 + 4 * 30 * 24, 12 * 30 * 24 + 8 * 30 * 24]
-
+        """
+           seq_len =512, pred_len=96 (预测长度)， label_len =48
+           patch_len = 16, stride = 8
+           border1s =  [0,     8640 -512,     8640+2880 -512]
+           border2s =  [8640,  8640+2880,     8640+ 5760]
+           
+           Dataset_ETT_hour = 17,420
+        """
+        border1s = [0,            12 * 30 * 24 - self.seq_len, 12 * 30 * 24 + 4 * 30 * 24 - self.seq_len]
+        border2s = [12 * 30 * 24, 12 * 30 * 24 + 4 * 30 * 24,  12 * 30 * 24 + 8 * 30 * 24]
+        ## set_type ==> 'train': 0, 'val': 1, 'test': 2
         border1 = border1s[self.set_type]
         border2 = border2s[self.set_type]
 
         if self.set_type == 0:
+            ## border2 = （8640 - 512）/100 // 100 +512 = 28 + 512 =540
             border2 = (border2 - self.seq_len) * self.percent // 100 + self.seq_len
 
         if self.features == 'M' or self.features == 'MS':
@@ -62,14 +74,15 @@ class Dataset_ETT_hour(Dataset):
             df_data = df_raw[cols_data]
         elif self.features == 'S':
             df_data = df_raw[[self.target]]
-
+        ## 执行标准的scale
         if self.scale:
-            train_data = df_data[border1s[0]:border2s[0]]
+            train_data = df_data[border1s[0]:border2s[0]] ## [0, 8640 = 12*30*24  = 12 months hourly data ??]
             self.scaler.fit(train_data.values)
             data = self.scaler.transform(df_data.values)
         else:
             data = df_data.values
 
+        ##  df_stamp ==> date 数据？？？
         df_stamp = df_raw[['date']][border1:border2]
         df_stamp['date'] = pd.to_datetime(df_stamp.date)
         if self.timeenc == 0:
@@ -86,13 +99,22 @@ class Dataset_ETT_hour(Dataset):
         self.data_y = data[border1:border2]
         self.data_stamp = data_stamp
 
-
+    """
+       label_len = 48
+       seq_len   = 512  每次单个样本的数据的长度
+       pred_len  = 96   预测的长度
+       
+       index = 获取第几个样本？
+       __getitem__ == data[index] 方法，通过index 获取对应的样本       
+    """
     def __getitem__(self, index):
+        ## Floor division is a division operation that rounds the result down to the nearest whole number or integer, which is less than or equal to the normal division result
         feat_id = index // self.tot_len
+
         s_begin = index % self.tot_len
 
-        s_end = s_begin + self.seq_len
-        r_begin = s_end - self.label_len
+        s_end =   s_begin + self.seq_len
+        r_begin = s_end   - self.label_len
         r_end = r_begin + self.label_len + self.pred_len
         seq_x = self.data_x[s_begin:s_end, feat_id:feat_id + 1]
         seq_y = self.data_y[r_begin:r_end, feat_id:feat_id + 1]
@@ -101,9 +123,11 @@ class Dataset_ETT_hour(Dataset):
 
         return seq_x, seq_y, seq_x_mark, seq_y_mark
 
+
     def __len__(self):
         return (len(self.data_x) - self.seq_len - self.pred_len + 1) * self.enc_in
 
+    ## 标准化的数据转换为原始数据！
     def inverse_transform(self, data):
         return self.scaler.inverse_transform(data)
 
@@ -205,7 +229,11 @@ class Dataset_ETT_minute(Dataset):
     def inverse_transform(self, data):
         return self.scaler.inverse_transform(data)
 
-
+"""
+  self.data_x  ==> {ndarray, sparse matrix} of shape (n_samples, n_features)
+  自定义的数据集
+  
+"""
 class Dataset_Custom(Dataset):
     def __init__(self, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',

@@ -164,12 +164,13 @@ class PatchEmbedding(nn.Module):
         self.patch_len = patch_len
         self.stride = stride
         self.padding_patch_layer = ReplicationPad1d((0, stride))
-
-        # Backbone, Input encoding: projection of feature vectors onto a d-dim vector space
+        # https://github.com/vllm-project/vllm/issues/416
+        # Backbone, Input encoding: projection of feature vectors onto a d-dim vector space, d_model =32
         self.value_embedding = TokenEmbedding(patch_len, d_model)
 
         # Positional embedding
-        # self.position_embedding = PositionalEmbedding(d_model)
+
+        self.position_embedding = PositionalEmbedding(d_model)
 
         # Residual dropout
         self.dropout = nn.Dropout(dropout)

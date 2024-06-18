@@ -18,6 +18,8 @@ def data_provider(args, flag):
     timeenc = 0 if args.embed != 'timeF' else 1
     percent = args.percent
 
+    ## 测试数据不执行shuffle
+    ## timeenc =1 since Embed = 'timeF'
     if flag == 'test':
         shuffle_flag = False
         drop_last = True
@@ -36,7 +38,7 @@ def data_provider(args, flag):
             data_path=args.data_path,
             flag=flag,
             size=[args.seq_len, args.label_len, args.pred_len],
-            features=args.features,
+            features=args.features,  ## features='M'
             target=args.target,
             timeenc=timeenc,
             freq=freq,
@@ -50,7 +52,7 @@ def data_provider(args, flag):
             size=[args.seq_len, args.label_len, args.pred_len],
             features=args.features,
             target=args.target,
-            timeenc=timeenc,
+            timeenc=timeenc,## timeenc =1
             freq=freq,
             percent=percent,
             seasonal_patterns=args.seasonal_patterns
