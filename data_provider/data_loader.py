@@ -41,8 +41,8 @@ class Dataset_ETT_hour(Dataset):
         self.root_path = root_path
         self.data_path = data_path
         self.__read_data__()
-        # self.data_x
-        self.enc_in = self.data_x.shape[-1]
+        # self.data_x， 根据 train/vali/test 不同的scenario，index不一样
+        self.enc_in = self.data_x.shape[-1]  #  shape[-1]  最后的维度值
         ## 因为 最后一笔数据 length = self.seq_len +self.pred_len - 1， 所以可用的total len需要扣减
         self.tot_len = len(self.data_x) - self.seq_len - self.pred_len + 1
 
@@ -52,7 +52,9 @@ class Dataset_ETT_hour(Dataset):
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
         """
-           seq_len =512, pred_len=96 (预测长度)， label_len =48
+           seq_len =512, 
+           pred_len=96 (预测长度)， 
+           label_len =48
            patch_len = 16, stride = 8
            border1s =  [0,     8640 -512,     8640+2880 -512]
            border2s =  [8640,  8640+2880,     8640+ 5760]
@@ -65,6 +67,7 @@ class Dataset_ETT_hour(Dataset):
         border1 = border1s[self.set_type]
         border2 = border2s[self.set_type]
 
+        ## set_type == 0 ==> train data
         if self.set_type == 0:
             ## border2 = （8640 - 512）/100 // 100 +512 = 28 + 512 =540
             border2 = (border2 - self.seq_len) * self.percent // 100 + self.seq_len
@@ -100,12 +103,26 @@ class Dataset_ETT_hour(Dataset):
         self.data_stamp = data_stamp
 
     """
-       label_len = 48
+        # size: 512, 48, 96
+        # self.seq_len (512): This is the length of the input sequences to the model. 
+        #   In the context of time series forecasting, this would be the number of time steps from the past data that 
+        #   the model will use to make its predictions.
+        # self.label_len (48): This is the length of the label sequences. In time series forecasting, 
+        #   this could be the number of time steps that the model is trained to predict ahead in the future.
+        # self.pred_len (96): This is the length of the prediction sequences. This could be the number of time steps that
+        #   the model is actually used to predict ahead in the future when it is deployed. This value can be different 
+        #   from self.label_len depending on the specific forecasting strategy used. For example, in some cases, 
+        #   the model might be trained to predict only the next few steps, but then used to make predictions further
+        #   into the future by feeding its own predictions back as input.
+       
+       label_len = 48   模型训练的时候，训练model预测未来的长度
        seq_len   = 512  每次单个样本的数据的长度
-       pred_len  = 96   预测的长度
+       pred_len  = 96   模型部署以后，预测的长度 ，和label_len不同，因为我们可以训练时预测48 steps，实际部署模型预测96 steps
        
        index = 获取第几个样本？
        __getitem__ == data[index] 方法，通过index 获取对应的样本       
+       
+       下面的__len__ 方法有考虑到多个变量的情况，所以feat_id = 0，1，2.。。全部变量数量，这个方法的用法是把全部变量flattern，从而共享transfomer的权重！！
     """
     def __getitem__(self, index):
         ## Floor division is a division operation that rounds the result down to the nearest whole number or integer, which is less than or equal to the normal division result
@@ -114,6 +131,7 @@ class Dataset_ETT_hour(Dataset):
         s_begin = index % self.tot_len
 
         s_end =   s_begin + self.seq_len
+        ## 因为预测的时候需要用到最后一批训练数据 (self.label_len ,seq_y 似乎是预测有关系的部分)
         r_begin = s_end   - self.label_len
         r_end = r_begin + self.label_len + self.pred_len
         seq_x = self.data_x[s_begin:s_end, feat_id:feat_id + 1]
@@ -233,6 +251,9 @@ class Dataset_ETT_minute(Dataset):
   self.data_x  ==> {ndarray, sparse matrix} of shape (n_samples, n_features)
   自定义的数据集
   
+  未来的修改，需要增加一个方法，允许把modelling 获取的train data传入第二个loader，作为train的data执行标准化！
+  或者传入scaler的值！
+  
 """
 class Dataset_Custom(Dataset):
     def __init__(self, root_path, flag='train', size=None,
@@ -273,6 +294,9 @@ class Dataset_Custom(Dataset):
 
         '''
         df_raw.columns: ['date', ...(other features), target feature]
+        
+        1. 70% 训练数据， 20%测试数据， 10% valid数据
+        
         '''
         cols = list(df_raw.columns)
         cols.remove(self.target)
@@ -288,15 +312,25 @@ class Dataset_Custom(Dataset):
 
         if self.set_type == 0:
             border2 = (border2 - self.seq_len) * self.percent // 100 + self.seq_len
-
+        '''
+           S： univariate to univariate的意思是： 单个的时间序列预测，比如SP500指数，利用过去的值预测未来值
+           M： 多个变量 预测target 变量，比如我们预测10分钟的支付sum，已经做了变换，区分了X,Y变量，target变量Y的值不会用于预测了！
+           
+           cols_data = df_raw.columns[1:] ==> 第一个变量是date，其余变量是X,Y变量
+        '''
         if self.features == 'M' or self.features == 'MS':
             cols_data = df_raw.columns[1:]
             df_data = df_raw[cols_data]
         elif self.features == 'S':
+            # 利用过去的值预测未来值， X,Y变量来源相同,所以data只包含了target变量
             df_data = df_raw[[self.target]]
+
+        # 对数据执行scale的时候，使用的是训练数据，所以vali和test数据 会出现异常点！
+        # ==> 执行infer的时候，我们需要使用同一批数据对外推数据进行标准化？？
 
         if self.scale:
             train_data = df_data[border1s[0]:border2s[0]]
+            # 内部计算scaler的mean和variance，然后用此数据执行标准化！
             self.scaler.fit(train_data.values)
             data = self.scaler.transform(df_data.values)
         else:
@@ -319,9 +353,14 @@ class Dataset_Custom(Dataset):
         self.data_stamp = data_stamp
 
     def __getitem__(self, index):
-        feat_id = index // self.tot_len
+        feat_id = index // self.tot_len  # feat_id == 0, always ????
         s_begin = index % self.tot_len
-
+        """
+           注意： seq_x，seq_y的区别在于序列的时间段。他们之间有self.label_len 这段的overlapping的部分
+           seq_x = s_begin + self.seq_len （用于预测的序列长度）
+           
+           这里使用的是单个变量，参考https://github.com/KimMeen/Time-LLM/issues/72 关于channel independence的讨论
+        """
         s_end = s_begin + self.seq_len
         r_begin = s_end - self.label_len
         r_end = r_begin + self.label_len + self.pred_len
@@ -332,6 +371,9 @@ class Dataset_Custom(Dataset):
 
         return seq_x, seq_y, seq_x_mark, seq_y_mark
 
+    """
+       __len__方法和__getitem__ 合并一起可以用于load数据。还有self.tot_len的计算方法
+    """
     def __len__(self):
         return (len(self.data_x) - self.seq_len - self.pred_len + 1) * self.enc_in
 

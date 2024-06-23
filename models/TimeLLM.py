@@ -29,6 +29,11 @@ class FlattenHead(nn.Module):
 
 class Model(nn.Module):
 
+
+
+    """
+       1. 这里init方法只是执行一般的模型初始化，真正执行模型在forward方法！
+    """
     def __init__(self, configs, patch_len=16, stride=8):
         super(Model, self).__init__()
         self.task_name = configs.task_name
@@ -232,6 +237,7 @@ class Model(nn.Module):
 
         prompt = []
         ##   这是把数据 -> str 再附加prompt？？
+        ##   b ==> batch_size，求解scaler的min，max是逐个批次求解的？？
         for b in range(x_enc.shape[0]):
             min_values_str = str(min_values[b].tolist()[0])
             max_values_str = str(max_values[b].tolist()[0])
@@ -264,10 +270,12 @@ class Model(nn.Module):
 
         x_enc = x_enc.permute(0, 2, 1).contiguous()
         enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
-
+        """
+           本文的创新点，新增加的reprogramming_layer，对输入的数据计算 attention的值 
+        """
         enc_out = self.reprogramming_layer(enc_out, source_embeddings, source_embeddings)
         """
-          figure 2的中间的图示，把 prompt_embeddings 和 patch_embedding的结果简单的 concat起来，然后扔给LLM ？？
+          figure 2的中间的图示，把 prompt_embeddings 和 attention的值  简单的 concat起来，然后扔给LLM ？？
         """
         llama_enc_out = torch.cat([prompt_embeddings, enc_out], dim=1)
 

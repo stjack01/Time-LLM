@@ -133,7 +133,9 @@ def cal_accuracy(y_pred, y_true):
 def del_files(dir_path):
     shutil.rmtree(dir_path)
 
-
+"""
+    处理valid和test数据集
+"""
 def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric):
     total_loss = []
     total_mae_loss = []
@@ -146,7 +148,7 @@ def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric
             batch_x_mark = batch_x_mark.float().to(accelerator.device)
             batch_y_mark = batch_y_mark.float().to(accelerator.device)
 
-            # decoder input
+            # decoder input， 最后pred_len（48）个数据点的值
             dec_inp = torch.zeros_like(batch_y[:, -args.pred_len:, :]).float()
             dec_inp = torch.cat([batch_y[:, :args.label_len, :], dec_inp], dim=1).float().to(
                 accelerator.device)
@@ -164,7 +166,8 @@ def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric
                     outputs = model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
             outputs, batch_y = accelerator.gather_for_metrics((outputs, batch_y))
-
+            # 这里是关键，如果features == 'MS'，表示目标变量是Univariate 单变量，那么计算output的时候就只考虑target，也就是最后一个变量[-1:]
+            # 如果 features == 'M'，表示同时执行对全部变量multiple variables的预测，所以计算output的loss的时候需要处理全部
             f_dim = -1 if args.features == 'MS' else 0
             outputs = outputs[:, -args.pred_len:, f_dim:]
             batch_y = batch_y[:, -args.pred_len:, f_dim:].to(accelerator.device)
@@ -181,7 +184,7 @@ def vali(args, accelerator, model, vali_data, vali_loader, criterion, mae_metric
 
     total_loss = np.average(total_loss)
     total_mae_loss = np.average(total_mae_loss)
-
+    # 这个只是修改 torch.no_grad() ，下次继续使用grade梯度优化，不是实际的train
     model.train()
     return total_loss, total_mae_loss
 

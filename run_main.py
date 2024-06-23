@@ -27,6 +27,7 @@ torch.manual_seed(fix_seed)
 np.random.seed(fix_seed)
 
 # basic config
+# 关键的变量 ： enc_in ==> 包含output变量但是排除date变量的全部变量数 ？？自动计算？？？
 parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast',
                     help='task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection]')
 parser.add_argument('--is_training', type=int, required=True, default=1, help='status')
@@ -124,6 +125,8 @@ for ii in range(args.itr):
         args.n_heads,
         args.e_layers,
         args.d_layers,
+        ## d_ff来自于dimension_feedforward，是指transformer中的feedforward中间层的维度，这里是也是一个维度变换的中间维度，从d_model变换到d_ff
+        ## https://github.com/KimMeen/Time-LLM/issues/95
         args.d_ff,
         args.factor,
         args.embed,
@@ -187,8 +190,10 @@ for ii in range(args.itr):
             model_optim.zero_grad()
             """ 
                 所以X和Y需要重新编码？？？
-                batch_y.shape  => torch.Size([24, 144, 1])
                 batch_x.shape  => torch.Size([24, 512, 1])
+                batch_y.shape  => torch.Size([24, 144, 1])
+                
+                
                 batch_x_mark.shape => torch.Size([24, 512, 4])
                 batch_y_mark.shape => torch.Size([24, 144, 4])
                 
